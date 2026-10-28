@@ -44,6 +44,9 @@
             android:key="@string/key_github_token"
             android:summary="@string/summary_github_token"
             android:inputType="textPassword" />
+        <Preference android:title="@string/title_github_download_token"
+            android:key="@string/key_github_download_token"
+            android:summary="@string/summary_github_download_token" />
         <Preference android:title="@string/title_github_export_now"
             android:key="@string/key_github_export_now"
             android:summary="@string/summary_github_export_now" />

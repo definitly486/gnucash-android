@@ -514,4 +514,11 @@
     <string name="toast_github_not_configured">Set repository and access token first</string>
     <string name="toast_github_export_successful">Backup exported to GitHub</string>
     <string name="toast_github_export_failed">GitHub export failed: %1$s</string>
+    <string name="title_github_download_token">Download token</string>
+    <string name="summary_github_download_token">Download the encrypted token file, decrypt it with a password and fill in the access token</string>
+    <string name="title_github_token_password">Token file password</string>
+    <string name="hint_github_token_password">Password</string>
+    <string name="btn_github_token_decrypt">Decrypt</string>
+    <string name="toast_github_token_loaded">Access token downloaded and saved</string>
+    <string name="toast_github_token_failed">Could not get the token: %1$s</string>
 </resources>

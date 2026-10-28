@@ -480,4 +480,11 @@
     <string name="toast_github_not_configured">Сначала укажите репозиторий и токен доступа</string>
     <string name="toast_github_export_successful">Резервная копия экспортирована в GitHub</string>
     <string name="toast_github_export_failed">Ошибка экспорта в GitHub: %1$s</string>
+    <string name="title_github_download_token">Скачать токен</string>
+    <string name="summary_github_download_token">Скачать зашифрованный файл с токеном, расшифровать паролем и подставить в поле токена доступа</string>
+    <string name="title_github_token_password">Пароль к файлу с токеном</string>
+    <string name="hint_github_token_password">Пароль</string>
+    <string name="btn_github_token_decrypt">Расшифровать</string>
+    <string name="toast_github_token_loaded">Токен доступа скачан и сохранён</string>
+    <string name="toast_github_token_failed">Не удалось получить токен: %1$s</string>
 </resources>

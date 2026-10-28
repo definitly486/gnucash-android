@@ -244,4 +244,5 @@
     <string name="key_github_path" translatable="false">github_export_path</string>
     <string name="key_github_token" translatable="false">github_export_token</string>
     <string name="key_github_export_now" translatable="false">github_export_now</string>
+    <string name="key_github_download_token" translatable="false">github_download_token</string>
 </resources>

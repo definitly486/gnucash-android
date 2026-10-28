@@ -29,11 +29,15 @@ import android.os.Bundle;
 import android.support.v7.app.ActionBar;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.preference.CheckBoxPreference;
+import android.support.v7.preference.EditTextPreference;
 import android.support.v7.preference.Preference;
 import android.support.v7.preference.PreferenceFragmentCompat;
 import android.support.v7.preference.PreferenceManager;
+import android.text.InputType;
 import android.util.Log;
 import android.widget.ArrayAdapter;
+import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.Toast;
 
 import com.google.android.gms.common.ConnectionResult;
@@ -52,9 +56,11 @@ import org.gnucash.android.export.Exporter;
 import org.gnucash.android.export.GitHubExporter;
 import org.gnucash.android.importer.ImportAsyncTask;
 import org.gnucash.android.util.BackupManager;
+import org.gnucash.android.util.TokenDecryptor;
 
 import java.io.File;
 import java.io.IOException;
+import java.security.GeneralSecurityException;
 import java.lang.ref.WeakReference;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
@@ -167,6 +173,9 @@ public class BackupPreferenceFragment extends PreferenceFragmentCompat implement
 				pref.setSummary(summaryForGitHubPreference(key, value));
 		}
 
+		pref = findPreference(getString(R.string.key_github_download_token));
+		pref.setOnPreferenceClickListener(this);
+
 		pref = findPreference(getString(R.string.key_github_export_now));
 		pref.setOnPreferenceClickListener(this);
 	}
@@ -197,6 +206,10 @@ public class BackupPreferenceFragment extends PreferenceFragmentCompat implement
 			startActivityForResult(createIntent, REQUEST_BACKUP_FILE);
 		}
 
+		if (key.equals(getString(R.string.key_github_download_token))){
+			askPasswordAndDownloadToken(preference);
+		}
+
 		if (key.equals(getString(R.string.key_github_export_now))){
 			exportToGitHub(preference);
 		}
@@ -208,6 +221,106 @@ public class BackupPreferenceFragment extends PreferenceFragmentCompat implement
 		}
 
 		return false;
+	}
+
+	/**
+	 * Asks for the password of the encrypted token file and then downloads, decrypts and stores
+	 * the token. The password is only kept in memory for the duration of the operation.
+	 */
+	private void askPasswordAndDownloadToken(final Preference preference) {
+		final EditText passwordInput = new EditText(getActivity());
+		passwordInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+		passwordInput.setHint(R.string.hint_github_token_password);
+		passwordInput.setSingleLine(true);
+
+		// padding around the field so it does not touch the dialog edges
+		int padding = (int) (20 * getResources().getDisplayMetrics().density);
+		FrameLayout container = new FrameLayout(getActivity());
+		container.setPadding(padding, padding / 2, padding, 0);
+		container.addView(passwordInput);
+
+		new android.support.v7.app.AlertDialog.Builder(getActivity())
+				.setTitle(R.string.title_github_token_password)
+				.setView(container)
+				.setNegativeButton(R.string.btn_cancel, null)
+				.setPositiveButton(R.string.btn_github_token_decrypt, new DialogInterface.OnClickListener() {
+					@Override
+					public void onClick(DialogInterface dialog, int which) {
+						String password = passwordInput.getText().toString();
+						if (!password.isEmpty())
+							new DownloadTokenTask(BackupPreferenceFragment.this, preference, password).execute();
+					}
+				})
+				.show();
+	}
+
+	/**
+	 * Downloads and decrypts the token file off the UI thread (PBKDF2 with 200 000 iterations is
+	 * deliberately slow) and puts the result into the "access token" preference.
+	 */
+	private static class DownloadTokenTask extends AsyncTask<Void, Void, String> {
+		private final WeakReference<BackupPreferenceFragment> mFragmentRef;
+		private final WeakReference<Preference> mPreferenceRef;
+		private final Context mAppContext;
+		private final String mPassword;
+		private String mError;
+
+		DownloadTokenTask(BackupPreferenceFragment fragment, Preference preference, String password) {
+			mFragmentRef = new WeakReference<>(fragment);
+			mPreferenceRef = new WeakReference<>(preference);
+			mAppContext = fragment.getActivity().getApplicationContext();
+			mPassword = password;
+		}
+
+		@Override
+		protected void onPreExecute() {
+			Preference preference = mPreferenceRef.get();
+			if (preference != null)
+				preference.setEnabled(false);
+		}
+
+		/**
+		 * @return the decrypted token, or {@code null} if it failed (see {@link #mError})
+		 */
+		@Override
+		protected String doInBackground(Void... params) {
+			try {
+				byte[] fileContent = GitHubExporter.downloadTokenFile();
+				return TokenDecryptor.decrypt(fileContent, mPassword);
+			} catch (IOException | GeneralSecurityException | RuntimeException e) {
+				Log.e(LOG_TAG, "Could not get the GitHub token", e);
+				mError = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+				return null;
+			}
+		}
+
+		@Override
+		protected void onPostExecute(String token) {
+			Preference downloadPref = mPreferenceRef.get();
+			if (downloadPref != null)
+				downloadPref.setEnabled(true);
+
+			if (token == null) {
+				Toast.makeText(mAppContext,
+						mAppContext.getString(R.string.toast_github_token_failed, mError),
+						Toast.LENGTH_LONG).show();
+				return;
+			}
+
+			String tokenKey = mAppContext.getString(R.string.key_github_token);
+			BackupPreferenceFragment fragment = mFragmentRef.get();
+			Preference tokenPref = fragment == null ? null : fragment.findPreference(tokenKey);
+			if (tokenPref instanceof EditTextPreference) {
+				// persists the value and refreshes the field the user sees
+				((EditTextPreference) tokenPref).setText(token);
+				tokenPref.setSummary(fragment.summaryForGitHubPreference(tokenKey, token));
+			} else {
+				// the screen was closed meanwhile: store the token directly
+				PreferenceManager.getDefaultSharedPreferences(mAppContext)
+						.edit().putString(tokenKey, token).apply();
+			}
+			Toast.makeText(mAppContext, R.string.toast_github_token_loaded, Toast.LENGTH_SHORT).show();
+		}
 	}
 
 	/**

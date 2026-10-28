@@ -37,6 +37,48 @@ public class GitHubExporter {
     private static final String API_URL = "https://api.github.com/repos/%s/contents/%s";
     private static final int TIMEOUT_MS = 30000;
 
+    /**
+     * Location of the password-encrypted access token (raw content of
+     * https://github.com/definitly486/gnucash/blob/main/token.enc)
+     */
+    public static final String TOKEN_FILE_URL =
+            "https://raw.githubusercontent.com/definitly486/gnucash/main/token.enc";
+    private static final int MAX_TOKEN_FILE_BYTES = 64 * 1024;
+
+    /**
+     * Downloads the encrypted token file. Must be called from a background thread.
+     *
+     * @return the raw file content
+     * @throws IOException if the download failed
+     */
+    public static byte[] downloadTokenFile() throws IOException {
+        HttpURLConnection connection = (HttpURLConnection) new URL(TOKEN_FILE_URL).openConnection();
+        try {
+            connection.setConnectTimeout(TIMEOUT_MS);
+            connection.setReadTimeout(TIMEOUT_MS);
+            int code = connection.getResponseCode();
+            if (code != HttpURLConnection.HTTP_OK)
+                throw new IOException("HTTP " + code + " while downloading the token file");
+
+            InputStream in = connection.getInputStream();
+            try {
+                ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+                byte[] chunk = new byte[2048];
+                int n;
+                while ((n = in.read(chunk)) != -1) {
+                    buffer.write(chunk, 0, n);
+                    if (buffer.size() > MAX_TOKEN_FILE_BYTES)
+                        throw new IOException("Token file is unexpectedly large");
+                }
+                return buffer.toByteArray();
+            } finally {
+                in.close();
+            }
+        } finally {
+            connection.disconnect();
+        }
+    }
+
     private final String mRepo;
     private final String mBranch;
     private final String mFolder;
