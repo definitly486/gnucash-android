@@ -46,6 +46,11 @@ public class GitHubExporter {
     private static final int MAX_TOKEN_FILE_BYTES = 64 * 1024;
 
     /**
+     * Name of the (encrypted) backup file in the repository. It is replaced on every export.
+     */
+    public static final String BACKUP_FILE_NAME = "definitly.gnucash";
+
+    /**
      * Downloads the encrypted token file. Must be called from a background thread.
      *
      * @return the raw file content
@@ -137,12 +142,17 @@ public class GitHubExporter {
                 .replace("%2F", "/").replace("+", "%20");
         URL url = new URL(String.format(API_URL, mRepo, encodedPath));
 
+        // updating an existing file requires the blob sha of its current version
+        String existingSha = findExistingSha(url);
+
         JSONObject body = new JSONObject();
         try {
             body.put("message", "GnuCash Android backup " + fileName);
             body.put("content", Base64.encodeToString(content, Base64.NO_WRAP));
             if (!mBranch.isEmpty())
                 body.put("branch", mBranch);
+            if (existingSha != null)
+                body.put("sha", existingSha);
         } catch (JSONException e) {
             throw new IOException(e);
         }
@@ -169,6 +179,49 @@ public class GitHubExporter {
             int code = connection.getResponseCode();
             if (code != HttpURLConnection.HTTP_OK && code != HttpURLConnection.HTTP_CREATED) {
                 throw new IOException("HTTP " + code + ": " + readGitHubMessage(connection));
+            }
+        } finally {
+            connection.disconnect();
+        }
+    }
+
+    /**
+     * Looks up the file at {@code contentsUrl} on the configured branch.
+     *
+     * @return the blob sha of the existing file, or {@code null} if the file does not exist yet
+     * @throws IOException if the lookup failed for any other reason
+     */
+    private String findExistingSha(URL contentsUrl) throws IOException {
+        String lookup = contentsUrl.toString();
+        if (!mBranch.isEmpty())
+            lookup += "?ref=" + java.net.URLEncoder.encode(mBranch, "UTF-8");
+
+        HttpURLConnection connection = (HttpURLConnection) new URL(lookup).openConnection();
+        try {
+            connection.setConnectTimeout(TIMEOUT_MS);
+            connection.setReadTimeout(TIMEOUT_MS);
+            connection.setRequestProperty("Authorization", "Bearer " + mToken);
+            connection.setRequestProperty("Accept", "application/vnd.github+json");
+
+            int code = connection.getResponseCode();
+            if (code == HttpURLConnection.HTTP_NOT_FOUND)
+                return null;
+            if (code != HttpURLConnection.HTTP_OK)
+                throw new IOException("HTTP " + code + ": " + readGitHubMessage(connection));
+
+            InputStream in = connection.getInputStream();
+            try {
+                ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+                byte[] chunk = new byte[2048];
+                int n;
+                while ((n = in.read(chunk)) != -1)
+                    buffer.write(chunk, 0, n);
+                String sha = new JSONObject(buffer.toString("UTF-8")).optString("sha", null);
+                return sha == null || sha.isEmpty() ? null : sha;
+            } catch (JSONException e) {
+                throw new IOException("Unexpected response from GitHub", e);
+            } finally {
+                in.close();
             }
         } finally {
             connection.disconnect();

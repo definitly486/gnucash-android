@@ -510,7 +510,7 @@
     <string name="title_github_token">Access token</string>
     <string name="summary_github_token">Personal access token with write access to the repository</string>
     <string name="title_github_export_now">Export backup to GitHub</string>
-    <string name="summary_github_export_now">Upload a backup of the active book to the repository</string>
+    <string name="summary_github_export_now">Upload an encrypted backup of the active book as definitly.gnucash</string>
     <string name="toast_github_not_configured">Set repository and access token first</string>
     <string name="toast_github_export_successful">Backup exported to GitHub</string>
     <string name="toast_github_export_failed">GitHub export failed: %1$s</string>
@@ -521,4 +521,8 @@
     <string name="btn_github_token_decrypt">Decrypt</string>
     <string name="toast_github_token_loaded">Access token downloaded and saved</string>
     <string name="toast_github_token_failed">Could not get the token: %1$s</string>
+    <string name="title_github_export_password">Backup encryption password</string>
+    <string name="hint_github_export_password_repeat">Repeat password</string>
+    <string name="btn_github_export">Export</string>
+    <string name="toast_github_password_mismatch">Passwords do not match</string>
 </resources>

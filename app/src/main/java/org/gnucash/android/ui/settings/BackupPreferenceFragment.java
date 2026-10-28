@@ -38,6 +38,7 @@ import android.util.Log;
 import android.widget.ArrayAdapter;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
 import android.widget.Toast;
 
 import com.google.android.gms.common.ConnectionResult;
@@ -51,11 +52,11 @@ import com.google.android.gms.drive.MetadataChangeSet;
 import org.gnucash.android.R;
 import org.gnucash.android.app.GnuCashApplication;
 import org.gnucash.android.db.adapter.BooksDbAdapter;
-import org.gnucash.android.export.ExportFormat;
 import org.gnucash.android.export.Exporter;
 import org.gnucash.android.export.GitHubExporter;
 import org.gnucash.android.importer.ImportAsyncTask;
 import org.gnucash.android.util.BackupManager;
+import org.gnucash.android.util.FileEncryptor;
 import org.gnucash.android.util.TokenDecryptor;
 
 import java.io.File;
@@ -339,27 +340,70 @@ public class BackupPreferenceFragment extends PreferenceFragmentCompat implement
 			Toast.makeText(getActivity(), R.string.toast_github_not_configured, Toast.LENGTH_LONG).show();
 			return;
 		}
-		String bookName = BooksDbAdapter.getInstance().getActiveBookDisplayName();
-		String fileName = Exporter.buildExportFilename(ExportFormat.XML, bookName);
-		new GitHubExportTask(this, preference, exporter, fileName).execute();
+		askExportPassword(preference, exporter);
 	}
 
 	/**
-	 * Builds the backup and uploads it to GitHub off the UI thread.
+	 * Asks for the password the exported backup is encrypted with. The password has to be typed
+	 * twice: a typo would otherwise produce a backup nobody can open. It is never stored.
+	 */
+	private void askExportPassword(final Preference preference, final GitHubExporter exporter) {
+		final EditText passwordInput = new EditText(getActivity());
+		passwordInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+		passwordInput.setHint(R.string.hint_github_token_password);
+		passwordInput.setSingleLine(true);
+
+		final EditText repeatInput = new EditText(getActivity());
+		repeatInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+		repeatInput.setHint(R.string.hint_github_export_password_repeat);
+		repeatInput.setSingleLine(true);
+
+		int padding = (int) (20 * getResources().getDisplayMetrics().density);
+		LinearLayout container = new LinearLayout(getActivity());
+		container.setOrientation(LinearLayout.VERTICAL);
+		container.setPadding(padding, padding / 2, padding, 0);
+		container.addView(passwordInput);
+		container.addView(repeatInput);
+
+		new android.support.v7.app.AlertDialog.Builder(getActivity())
+				.setTitle(R.string.title_github_export_password)
+				.setView(container)
+				.setNegativeButton(R.string.btn_cancel, null)
+				.setPositiveButton(R.string.btn_github_export, new DialogInterface.OnClickListener() {
+					@Override
+					public void onClick(DialogInterface dialog, int which) {
+						String password = passwordInput.getText().toString();
+						if (password.isEmpty())
+							return;
+						if (!password.equals(repeatInput.getText().toString())) {
+							Toast.makeText(getActivity(), R.string.toast_github_password_mismatch,
+									Toast.LENGTH_LONG).show();
+							askExportPassword(preference, exporter); // let the user try again
+							return;
+						}
+						new GitHubExportTask(BackupPreferenceFragment.this, preference, exporter, password).execute();
+					}
+				})
+				.show();
+	}
+
+	/**
+	 * Builds the backup, encrypts it and uploads it to GitHub as
+	 * {@link GitHubExporter#BACKUP_FILE_NAME} off the UI thread.
 	 * Static with weak references so it does not leak the fragment.
 	 */
 	private static class GitHubExportTask extends AsyncTask<Void, Void, String> {
 		private final WeakReference<Preference> mPreferenceRef;
 		private final Context mAppContext;
 		private final GitHubExporter mExporter;
-		private final String mFileName;
+		private final String mPassword;
 
 		GitHubExportTask(BackupPreferenceFragment fragment, Preference preference,
-						 GitHubExporter exporter, String fileName) {
+						 GitHubExporter exporter, String password) {
 			mPreferenceRef = new WeakReference<>(preference);
 			mAppContext = fragment.getActivity().getApplicationContext();
 			mExporter = exporter;
-			mFileName = fileName;
+			mPassword = password;
 		}
 
 		@Override
@@ -375,9 +419,11 @@ public class BackupPreferenceFragment extends PreferenceFragmentCompat implement
 		@Override
 		protected String doInBackground(Void... params) {
 			try {
-				mExporter.upload(mFileName, BackupManager.createActiveBookBackupBytes());
+				byte[] backup = BackupManager.createActiveBookBackupBytes();
+				byte[] encrypted = FileEncryptor.encrypt(backup, mPassword);
+				mExporter.upload(GitHubExporter.BACKUP_FILE_NAME, encrypted);
 				return null;
-			} catch (IOException | RuntimeException e) {
+			} catch (IOException | GeneralSecurityException | RuntimeException e) {
 				Log.e(LOG_TAG, "GitHub export failed", e);
 				return e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
 			}
