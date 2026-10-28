@@ -133,6 +133,25 @@ public class BackupManager {
     }
 
     /**
+     * Creates a gzipped XML backup of the active book in memory.
+     * Used by exports that need the backup content instead of a file (e.g. GitHub export).
+     *
+     * @return the gzipped GnuCash XML backup
+     * @throws IOException if the backup could not be generated
+     */
+    public static byte[] createActiveBookBackupBytes() throws IOException {
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        try (GZIPOutputStream gzipOutputStream = new GZIPOutputStream(bytes);
+             OutputStreamWriter writer = new OutputStreamWriter(gzipOutputStream, "UTF-8")) {
+            ExportParams params = new ExportParams(ExportFormat.XML);
+            new GncXmlExporter(params).generateExport(writer);
+            writer.flush();
+            gzipOutputStream.finish();
+        }
+        return bytes.toByteArray();
+    }
+
+    /**
      * Returns the full path of a file to make database backup of the specified book.
      * Backups are done in XML format and are Gzipped (with ".gnca" extension).
      * @param bookUID GUID of the book

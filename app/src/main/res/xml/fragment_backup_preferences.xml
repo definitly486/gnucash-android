@@ -26,17 +26,27 @@
         <Preference android:title="@string/title_restore_backup"
             android:key="@string/key_restore_backup"
             android:summary="@string/summary_restore_backup_pref" />
-        <CheckBoxPreference android:title="@string/title_dropbox_sync_preference"
-            android:summary="@string/summary_dropbox_sync"
-            android:checked="false"
-            android:key="@string/key_dropbox_sync"
-            android:icon="@drawable/ic_dropbox_android" />
-
-        <CheckBoxPreference android:title="@string/title_owncloud_sync_preference"
-            android:summary="@string/summary_owncloud_sync"
-            android:checked="false"
-            android:key="@string/key_owncloud_sync"
-            android:icon="@drawable/ic_owncloud" />
+    </PreferenceCategory>
+    <PreferenceCategory android:title="@string/title_github_export_category">
+        <EditTextPreference android:title="@string/title_github_repo"
+            android:key="@string/key_github_repo"
+            android:summary="@string/summary_github_repo"
+            android:inputType="textUri" />
+        <EditTextPreference android:title="@string/title_github_branch"
+            android:key="@string/key_github_branch"
+            android:defaultValue="main"
+            android:summary="@string/summary_github_branch" />
+        <EditTextPreference android:title="@string/title_github_path"
+            android:key="@string/key_github_path"
+            android:defaultValue="backups/"
+            android:summary="@string/summary_github_path" />
+        <EditTextPreference android:title="@string/title_github_token"
+            android:key="@string/key_github_token"
+            android:summary="@string/summary_github_token"
+            android:inputType="textPassword" />
+        <Preference android:title="@string/title_github_export_now"
+            android:key="@string/key_github_export_now"
+            android:summary="@string/summary_github_export_now" />
     </PreferenceCategory>
     <PreferenceCategory android:title="@string/title_export_preference_category">
 

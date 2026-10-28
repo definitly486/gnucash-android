@@ -239,4 +239,9 @@
         <item>ZWL</item>
         <item>PLN</item>
     </string-array>
+    <string name="key_github_repo" translatable="false">github_export_repo</string>
+    <string name="key_github_branch" translatable="false">github_export_branch</string>
+    <string name="key_github_path" translatable="false">github_export_path</string>
+    <string name="key_github_token" translatable="false">github_export_token</string>
+    <string name="key_github_export_now" translatable="false">github_export_now</string>
 </resources>

@@ -500,4 +500,18 @@
         <item>Tax</item>
         <item>Placeholder</item>
     </string-array>
+    <string name="title_github_export_category">Export to GitHub</string>
+    <string name="title_github_repo">Repository</string>
+    <string name="summary_github_repo">GitHub repository as owner/repo</string>
+    <string name="title_github_branch">Branch</string>
+    <string name="summary_github_branch">Branch the backup is committed to</string>
+    <string name="title_github_path">Folder in repository</string>
+    <string name="summary_github_path">Folder for backup files, e.g. backups/</string>
+    <string name="title_github_token">Access token</string>
+    <string name="summary_github_token">Personal access token with write access to the repository</string>
+    <string name="title_github_export_now">Export backup to GitHub</string>
+    <string name="summary_github_export_now">Upload a backup of the active book to the repository</string>
+    <string name="toast_github_not_configured">Set repository and access token first</string>
+    <string name="toast_github_export_successful">Backup exported to GitHub</string>
+    <string name="toast_github_export_failed">GitHub export failed: %1$s</string>
 </resources>

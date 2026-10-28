@@ -466,4 +466,18 @@
   <string name="label_select_destination_after_export">Выберите пункт назначения после завершения экспорта</string>
   <string name="label_dropbox_export_destination">Экспорт в \' / Apps/GnuCash Android /\' папку на Dropbox</string>
   <string name="title_section_preferences">Настройки</string>
+    <string name="title_github_export_category">Экспорт в GitHub</string>
+    <string name="title_github_repo">Репозиторий</string>
+    <string name="summary_github_repo">Репозиторий GitHub в виде owner/repo</string>
+    <string name="title_github_branch">Ветка</string>
+    <string name="summary_github_branch">Ветка, в которую будет закоммичена резервная копия</string>
+    <string name="title_github_path">Папка в репозитории</string>
+    <string name="summary_github_path">Папка для файлов резервных копий, например backups/</string>
+    <string name="title_github_token">Токен доступа</string>
+    <string name="summary_github_token">Personal access token с правом записи в репозиторий</string>
+    <string name="title_github_export_now">Экспортировать копию в GitHub</string>
+    <string name="summary_github_export_now">Загрузить резервную копию активной книги в репозиторий</string>
+    <string name="toast_github_not_configured">Сначала укажите репозиторий и токен доступа</string>
+    <string name="toast_github_export_successful">Резервная копия экспортирована в GitHub</string>
+    <string name="toast_github_export_failed">Ошибка экспорта в GitHub: %1$s</string>
 </resources>

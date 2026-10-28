@@ -36,7 +36,6 @@ import android.util.Log;
 import android.widget.ArrayAdapter;
 import android.widget.Toast;
 
-import com.dropbox.core.android.Auth;
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.GooglePlayServicesUtil;
 import com.google.android.gms.common.api.GoogleApiClient;
@@ -48,12 +47,14 @@ import com.google.android.gms.drive.MetadataChangeSet;
 import org.gnucash.android.R;
 import org.gnucash.android.app.GnuCashApplication;
 import org.gnucash.android.db.adapter.BooksDbAdapter;
+import org.gnucash.android.export.ExportFormat;
 import org.gnucash.android.export.Exporter;
+import org.gnucash.android.export.GitHubExporter;
 import org.gnucash.android.importer.ImportAsyncTask;
-import org.gnucash.android.ui.settings.dialog.OwnCloudDialogFragment;
 import org.gnucash.android.util.BackupManager;
 
 import java.io.File;
+import java.io.IOException;
 import java.lang.ref.WeakReference;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
@@ -71,10 +72,6 @@ import java.util.List;
 public class BackupPreferenceFragment extends PreferenceFragmentCompat implements
 		Preference.OnPreferenceClickListener, Preference.OnPreferenceChangeListener {
 
-	/**
-	 * Collects references to the UI elements and binds click listeners
-	 */
-	private static final int REQUEST_LINK_TO_DBX = 0x11;
 	public static final int REQUEST_RESOLVE_CONNECTION = 0x12;
 
 	/**
@@ -126,8 +123,6 @@ public class BackupPreferenceFragment extends PreferenceFragmentCompat implement
 		super.onResume();
 		SharedPreferences sharedPrefs = PreferenceManager.getDefaultSharedPreferences(getActivity());
 
-		//if we are returning from DropBox authentication, save the key which was generated
-
 		String keyDefaultEmail = getString(R.string.key_default_export_email);		
 		Preference pref = findPreference(keyDefaultEmail);
 		String defaultEmail = sharedPrefs.getString(keyDefaultEmail, null);
@@ -157,13 +152,32 @@ public class BackupPreferenceFragment extends PreferenceFragmentCompat implement
 			pref.setSummary(Uri.parse(defaultBackupLocation).getAuthority());
 		}
 
-		pref = findPreference(getString(R.string.key_dropbox_sync));
-		pref.setOnPreferenceClickListener(this);
-		toggleDropboxPreference(pref);
+		// GitHub export settings: show the stored values as summaries
+		String[] githubKeys = {
+				getString(R.string.key_github_repo),
+				getString(R.string.key_github_branch),
+				getString(R.string.key_github_path),
+				getString(R.string.key_github_token)
+		};
+		for (String key : githubKeys) {
+			pref = findPreference(key);
+			pref.setOnPreferenceChangeListener(this);
+			String value = sharedPrefs.getString(key, null);
+			if (value != null && !value.trim().isEmpty())
+				pref.setSummary(summaryForGitHubPreference(key, value));
+		}
 
-		pref = findPreference(getString(R.string.key_owncloud_sync));
+		pref = findPreference(getString(R.string.key_github_export_now));
 		pref.setOnPreferenceClickListener(this);
-		toggleOwnCloudPreference(pref);
+	}
+
+	/**
+	 * Summary text for a GitHub preference. The access token is never shown in clear text.
+	 */
+	private String summaryForGitHubPreference(String key, String value) {
+		if (key.equals(getString(R.string.key_github_token)))
+			return "••••••••";
+		return value;
 	}
 
 	@Override
@@ -183,14 +197,8 @@ public class BackupPreferenceFragment extends PreferenceFragmentCompat implement
 			startActivityForResult(createIntent, REQUEST_BACKUP_FILE);
 		}
 
-		if (key.equals(getString(R.string.key_dropbox_sync))){
-			toggleDropboxSync();
-			toggleDropboxPreference(preference);
-		}
-
-		if (key.equals(getString(R.string.key_owncloud_sync))){
-			toggleOwnCloudSync(preference);
-			toggleOwnCloudPreference(preference);
+		if (key.equals(getString(R.string.key_github_export_now))){
+			exportToGitHub(preference);
 		}
 
 		if (key.equals(getString(R.string.key_create_backup))){
@@ -200,6 +208,81 @@ public class BackupPreferenceFragment extends PreferenceFragmentCompat implement
 		}
 
 		return false;
+	}
+
+	/**
+	 * Uploads a backup of the active book to the configured GitHub repository.
+	 * Settings are read from the default shared preferences.
+	 */
+	private void exportToGitHub(Preference preference) {
+		SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(getActivity());
+		GitHubExporter exporter = new GitHubExporter(
+				prefs.getString(getString(R.string.key_github_repo), ""),
+				prefs.getString(getString(R.string.key_github_branch), "main"),
+				prefs.getString(getString(R.string.key_github_path), "backups/"),
+				prefs.getString(getString(R.string.key_github_token), ""));
+
+		if (!exporter.isConfigured()) {
+			Toast.makeText(getActivity(), R.string.toast_github_not_configured, Toast.LENGTH_LONG).show();
+			return;
+		}
+		String bookName = BooksDbAdapter.getInstance().getActiveBookDisplayName();
+		String fileName = Exporter.buildExportFilename(ExportFormat.XML, bookName);
+		new GitHubExportTask(this, preference, exporter, fileName).execute();
+	}
+
+	/**
+	 * Builds the backup and uploads it to GitHub off the UI thread.
+	 * Static with weak references so it does not leak the fragment.
+	 */
+	private static class GitHubExportTask extends AsyncTask<Void, Void, String> {
+		private final WeakReference<Preference> mPreferenceRef;
+		private final Context mAppContext;
+		private final GitHubExporter mExporter;
+		private final String mFileName;
+
+		GitHubExportTask(BackupPreferenceFragment fragment, Preference preference,
+						 GitHubExporter exporter, String fileName) {
+			mPreferenceRef = new WeakReference<>(preference);
+			mAppContext = fragment.getActivity().getApplicationContext();
+			mExporter = exporter;
+			mFileName = fileName;
+		}
+
+		@Override
+		protected void onPreExecute() {
+			Preference preference = mPreferenceRef.get();
+			if (preference != null)
+				preference.setEnabled(false);
+		}
+
+		/**
+		 * @return {@code null} on success, otherwise the error message
+		 */
+		@Override
+		protected String doInBackground(Void... params) {
+			try {
+				mExporter.upload(mFileName, BackupManager.createActiveBookBackupBytes());
+				return null;
+			} catch (IOException | RuntimeException e) {
+				Log.e(LOG_TAG, "GitHub export failed", e);
+				return e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+			}
+		}
+
+		@Override
+		protected void onPostExecute(String error) {
+			Preference preference = mPreferenceRef.get();
+			if (preference != null)
+				preference.setEnabled(true);
+
+			if (error == null)
+				Toast.makeText(mAppContext, R.string.toast_github_export_successful, Toast.LENGTH_SHORT).show();
+			else
+				Toast.makeText(mAppContext,
+						mAppContext.getString(R.string.toast_github_export_failed, error),
+						Toast.LENGTH_LONG).show();
+		}
 	}
 
 	/**
@@ -251,6 +334,14 @@ public class BackupPreferenceFragment extends PreferenceFragmentCompat implement
      */
 	@Override
 	public boolean onPreferenceChange(Preference preference, Object newValue) {
+		if (preference.getKey().equals(getString(R.string.key_github_repo))
+				|| preference.getKey().equals(getString(R.string.key_github_branch))
+				|| preference.getKey().equals(getString(R.string.key_github_path))
+				|| preference.getKey().equals(getString(R.string.key_github_token))) {
+			preference.setSummary(summaryForGitHubPreference(preference.getKey(), newValue.toString()));
+			return true;
+		}
+
 		preference.setSummary(newValue.toString());
 		if (preference.getKey().equals(getString(R.string.key_default_currency))){
 			GnuCashApplication.setDefaultCurrencyCode(newValue.toString());
@@ -275,25 +366,6 @@ public class BackupPreferenceFragment extends PreferenceFragmentCompat implement
 
 
 	/**
-	 * Toggles the checkbox of the DropBox Sync preference if a DropBox account is linked
-	 * @param pref DropBox Sync preference
-	 */
-	public void toggleDropboxPreference(Preference pref) {
-		SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(getActivity());
-		String accessToken = prefs.getString(getString(R.string.key_dropbox_access_token), null);
-		((CheckBoxPreference)pref).setChecked(accessToken != null);
-	}
-
-	/**
-	 * Toggles the checkbox of the ownCloud Sync preference if an ownCloud account is linked
-	 * @param pref ownCloud Sync preference
-	 */
-	public void toggleOwnCloudPreference(Preference pref) {
-		SharedPreferences mPrefs = getActivity().getSharedPreferences(getString(R.string.owncloud_pref), Context.MODE_PRIVATE);
-		((CheckBoxPreference)pref).setChecked(mPrefs.getBoolean(getString(R.string.owncloud_sync), false));
-	}
-
-	/**
 	 * Toggles the checkbox of the GoogleDrive Sync preference if a Google Drive account is linked
 	 * @param pref Google Drive Sync preference
 	 */
@@ -303,20 +375,6 @@ public class BackupPreferenceFragment extends PreferenceFragmentCompat implement
 		((CheckBoxPreference)pref).setChecked(appFolderId != null);
 	}
 
-
-	/**
-	 * Toggles the authorization state of a DropBox account.
-	 * If a link exists, it is removed else DropBox authorization is started
-	 */
-	private void toggleDropboxSync() {
-		SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(getActivity());
-		String accessToken = prefs.getString(getString(R.string.key_dropbox_access_token), null);
-		if (accessToken == null){
-			Auth.startOAuth2Authentication(getActivity(), getString(R.string.dropbox_app_key));
-		} else {
-			prefs.edit().remove(getString(R.string.key_dropbox_access_token)).apply();
-		}
-	}
 
 	/**
 	 * Toggles synchronization with Google Drive on or off
@@ -331,21 +389,6 @@ public class BackupPreferenceFragment extends PreferenceFragmentCompat implement
 			mGoogleApiClient.connect();
 		}
 	}
-
-	/**
-	 * Toggles synchronization with ownCloud on or off
-	 */
-	private void toggleOwnCloudSync(Preference pref){
-		SharedPreferences mPrefs = getActivity().getSharedPreferences(getString(R.string.owncloud_pref), Context.MODE_PRIVATE);
-
-		if (mPrefs.getBoolean(getString(R.string.owncloud_sync), false))
-			mPrefs.edit().putBoolean(getString(R.string.owncloud_sync), false).apply();
-		else {
-			OwnCloudDialogFragment ocDialog = OwnCloudDialogFragment.newInstance(pref);
-            ocDialog.show(getActivity().getSupportFragmentManager(), "owncloud_dialog");
-		}
-	}
-
 
 	public static GoogleApiClient getGoogleApiClient(final Context context) {
 		return new GoogleApiClient.Builder(context)
@@ -484,20 +527,9 @@ public class BackupPreferenceFragment extends PreferenceFragmentCompat implement
 	public void onActivityResult(int requestCode, int resultCode, Intent data) {
 		switch (requestCode){
 
-			case REQUEST_LINK_TO_DBX:
-				Preference preference = findPreference(getString(R.string.key_dropbox_sync));
-				if (preference == null) //if we are in a preference header fragment, this may return null
-					break;
-				toggleDropboxPreference(preference);
-				break;
-
 			case REQUEST_RESOLVE_CONNECTION:
 				if (resultCode == Activity.RESULT_OK) {
 					mGoogleApiClient.connect();
-					Preference pref = findPreference(getString(R.string.key_dropbox_sync));
-					if (pref == null) //if we are in a preference header fragment, this may return null
-						break;
-					toggleDropboxPreference(pref);
 				}
 				break;
 
