@@ -38,6 +38,43 @@ public class TokenDecryptorTest {
     private static final String IV_SALT_AES128 =
             "2knl4HdpDQQHatb3zp+wRn/ZFEnk8xf6jMqmoDTZPP+irXDU3SF0YERyAahbnOByeufeLDgofkcT17dt6x/zV2w61w4TqtFZx6krWNa3oSBm04pw";
 
+    /**
+     * Output of {@code openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000 -pass pass:"correct horse"}
+     * for a file holding {@link #OPENSSL_TOKEN} plus a trailing newline (112 bytes), as base64.
+     */
+    private static final String OPENSSL_FILE_BASE64 =
+            "U2FsdGVkX19GYz/Fas/gv2KkEPQeNT/DxvMlvN1leNZNmd2jxm8TxvA6+Bi4c/lbtb++5OY2bsFQF0Vd9ePpdaoXGSxaTpZ9cGPh4uG57DHBOXn++4RB5GIfLbQXz+rSQ5rZUHgD/Wp2UZLG/b70Ng==";
+    private static final String OPENSSL_TOKEN =
+            "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";
+
+    @Test
+    public void shouldDecryptOpenSslCbcFileAsBinary() throws Exception {
+        byte[] binary = java.util.Arrays.copyOf(decodeBase64(OPENSSL_FILE_BASE64), 112);
+        assertThat(binary.length).isEqualTo(112);
+        assertThat(TokenDecryptor.decrypt(binary, PASSWORD)).isEqualTo(OPENSSL_TOKEN);
+    }
+
+    @Test
+    public void shouldDecryptOpenSslCbcFileAsBase64Text() throws Exception {
+        assertThat(TokenDecryptor.decrypt(OPENSSL_FILE_BASE64.getBytes("US-ASCII"), PASSWORD))
+                .isEqualTo(OPENSSL_TOKEN);
+    }
+
+    @Test
+    public void shouldRejectWrongPasswordForOpenSslFile() throws Exception {
+        try {
+            TokenDecryptor.decrypt(OPENSSL_FILE_BASE64.getBytes("US-ASCII"), "correct horsE");
+            fail("a wrong password must not decrypt the token");
+        } catch (GeneralSecurityException expected) {
+            // expected
+        }
+    }
+
+    /** Test-only base64 decoder (java.util.Base64 is not available on API 19). */
+    private static byte[] decodeBase64(String text) {
+        return TokenDecryptor.toBinary(text.getBytes());
+    }
+
     @Test
     public void shouldDecryptBase64SaltIvLayout() throws Exception {
         assertThat(TokenDecryptor.decrypt(SALT_IV_AES256.getBytes("US-ASCII"), PASSWORD)).isEqualTo(TOKEN);

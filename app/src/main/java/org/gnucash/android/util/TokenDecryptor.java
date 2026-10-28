@@ -18,18 +18,25 @@ import java.io.UnsupportedEncodingException;
 import java.security.GeneralSecurityException;
 import java.util.Arrays;
 
+import javax.crypto.BadPaddingException;
 import javax.crypto.Cipher;
+import javax.crypto.IllegalBlockSizeException;
 import javax.crypto.Mac;
 import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
 /**
  * Decrypts an access token stored in a password-protected file.
  *
- * <p>Key derivation: PBKDF2-HMAC-SHA256 with {@value #PBKDF2_ITERATIONS} iterations.
- * Encryption: AES-GCM (128-bit tag, no associated data).</p>
+ * <p>Primary format: files created by
+ * {@code openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000} ("Salted__" + 8-byte salt +
+ * AES-256-CBC ciphertext, key and IV from PBKDF2-HMAC-SHA256).</p>
  *
- * <p>The file may be raw binary or base64 text. The binary layout is
+ * <p>Fallback format: PBKDF2-HMAC-SHA256 with {@value #PBKDF2_ITERATIONS} iterations and
+ * AES-GCM (128-bit tag, no associated data).</p>
+ *
+ * <p>The file may be raw binary or base64 text. The GCM binary layout is
  * {@code salt (16 bytes) | IV (12 bytes) | ciphertext + GCM tag}. Because the exact layout
  * of the producing tool is not recorded in the file, the order {@code IV | salt | ciphertext}
  * and AES-128 as well as AES-256 keys are tried too; GCM authentication guarantees that a
@@ -60,6 +67,10 @@ public final class TokenDecryptor {
      */
     public static String decrypt(byte[] fileContent, String password) throws GeneralSecurityException {
         byte[] data = toBinary(fileContent);
+
+        if (isOpenSslFormat(data))
+            return decryptOpenSsl(data, password);
+
         if (data.length < SALT_LENGTH + IV_LENGTH + TAG_LENGTH_BYTES + 1)
             throw new GeneralSecurityException("Encrypted token file is too short");
 
@@ -97,6 +108,68 @@ public final class TokenDecryptor {
             }
         }
         throw new GeneralSecurityException("Wrong password or unsupported token file format");
+    }
+
+    private static final byte[] OPENSSL_MAGIC = {'S', 'a', 'l', 't', 'e', 'd', '_', '_'};
+    private static final int OPENSSL_SALT_LENGTH = 8;
+    private static final int OPENSSL_HEADER_LENGTH = 16;
+
+    /**
+     * {@code true} for files made by {@code openssl enc}: "Salted__", an 8-byte salt and a
+     * whole number of AES blocks.
+     */
+    private static boolean isOpenSslFormat(byte[] data) {
+        if (data.length < OPENSSL_HEADER_LENGTH + 16 || (data.length - OPENSSL_HEADER_LENGTH) % 16 != 0)
+            return false;
+        for (int i = 0; i < OPENSSL_MAGIC.length; i++) {
+            if (data[i] != OPENSSL_MAGIC[i])
+                return false;
+        }
+        return true;
+    }
+
+    /**
+     * Decrypts a file created with
+     * {@code openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000 -in token -out token.enc}.
+     * openssl derives 48 bytes with PBKDF2-HMAC-SHA256 (its default digest): the first 32
+     * are the AES key, the next 16 the CBC IV. The salt is stored after the "Salted__" magic.
+     */
+    private static String decryptOpenSsl(byte[] data, String password) throws GeneralSecurityException {
+        byte[] passwordBytes;
+        try {
+            passwordBytes = password.getBytes("UTF-8");
+        } catch (UnsupportedEncodingException e) {
+            throw new GeneralSecurityException(e);
+        }
+        byte[] salt = Arrays.copyOfRange(data, OPENSSL_MAGIC.length, OPENSSL_MAGIC.length + OPENSSL_SALT_LENGTH);
+        byte[] derived = pbkdf2HmacSha256(passwordBytes, salt, PBKDF2_ITERATIONS, 48);
+        byte[] key = Arrays.copyOfRange(derived, 0, 32);
+        byte[] iv = Arrays.copyOfRange(derived, 32, 48);
+
+        byte[] plain;
+        try {
+            Cipher cipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
+            cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(key, "AES"), new IvParameterSpec(iv));
+            plain = cipher.doFinal(data, OPENSSL_HEADER_LENGTH, data.length - OPENSSL_HEADER_LENGTH);
+        } catch (BadPaddingException | IllegalBlockSizeException e) {
+            throw new GeneralSecurityException("Wrong password or corrupted token file", e);
+        }
+
+        // CBC has no authentication: a wrong password passes the padding check about once in
+        // 256 times and then yields garbage, so insist on a plausible printable token.
+        for (byte b : plain) {
+            if (b < 0x20 && b != '\n' && b != '\r' && b != '\t' || b >= 0x7F)
+                throw new GeneralSecurityException("Wrong password or corrupted token file");
+        }
+        String token;
+        try {
+            token = new String(plain, "UTF-8").trim();
+        } catch (UnsupportedEncodingException e) {
+            throw new GeneralSecurityException(e);
+        }
+        if (token.isEmpty())
+            throw new GeneralSecurityException("Wrong password or corrupted token file");
+        return token;
     }
 
     private static byte[] aesGcmDecrypt(byte[] key, byte[] iv, byte[] ciphertextWithTag)
