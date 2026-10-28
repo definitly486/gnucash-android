@@ -507,18 +507,25 @@ public class BackupPreferenceFragment extends PreferenceFragmentCompat implement
 					if (data != null){
 						backupFileUri = data.getData();
 					}
+					if (backupFileUri == null)
+						break;
 
 					final int takeFlags = data.getFlags()
 							& (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
 					getActivity().getContentResolver().takePersistableUriPermission(backupFileUri, takeFlags);
 
+					// commit (not apply): the backup task below reads this value right away
 					PreferenceActivity.getActiveBookSharedPreferences()
 							.edit()
 							.putString(BackupManager.KEY_BACKUP_FILE, backupFileUri.toString())
-							.apply();
+							.commit();
 
 					Preference pref = findPreference(getString(R.string.key_backup_location));
 					pref.setSummary(backupFileUri.getAuthority());
+
+					// The system file picker only creates an EMPTY document. Nothing is written
+					// to it until the next backup, so write the first backup now.
+					new CreateBackupTask(this, pref).execute();
 				}
 				break;
 		}
