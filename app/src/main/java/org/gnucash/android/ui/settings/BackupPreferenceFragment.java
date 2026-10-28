@@ -24,6 +24,7 @@ import android.content.Intent;
 import android.content.IntentSender;
 import android.content.SharedPreferences;
 import android.net.Uri;
+import android.os.AsyncTask;
 import android.os.Bundle;
 import android.support.v7.app.ActionBar;
 import android.support.v7.app.AppCompatActivity;
@@ -53,6 +54,7 @@ import org.gnucash.android.ui.settings.dialog.OwnCloudDialogFragment;
 import org.gnucash.android.util.BackupManager;
 
 import java.io.File;
+import java.lang.ref.WeakReference;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
@@ -192,12 +194,53 @@ public class BackupPreferenceFragment extends PreferenceFragmentCompat implement
 		}
 
 		if (key.equals(getString(R.string.key_create_backup))){
-			boolean result = BackupManager.backupActiveBook();
-			int msg = result ? R.string.toast_backup_successful : R.string.toast_backup_failed;
-			Toast.makeText(getActivity(), msg, Toast.LENGTH_SHORT).show();
+			// Run the export off the UI thread: the XML export of a large book can take
+			// a while and must not block (or be cut short by) the main thread.
+			new CreateBackupTask(this, preference).execute();
 		}
 
 		return false;
+	}
+
+	/**
+	 * Creates a backup of the active book on a background thread and reports the result
+	 * with a toast once it has finished.
+	 * <p>Declared static and holding only weak references so that a running backup
+	 * does not leak the fragment if the user leaves the screen.</p>
+	 */
+	private static class CreateBackupTask extends AsyncTask<Void, Void, Boolean> {
+		private final WeakReference<BackupPreferenceFragment> mFragmentRef;
+		private final WeakReference<Preference> mPreferenceRef;
+		private final Context mAppContext;
+
+		CreateBackupTask(BackupPreferenceFragment fragment, Preference preference) {
+			mFragmentRef = new WeakReference<>(fragment);
+			mPreferenceRef = new WeakReference<>(preference);
+			mAppContext = fragment.getActivity().getApplicationContext();
+		}
+
+		@Override
+		protected void onPreExecute() {
+			// prevent a second backup from being started while this one is running
+			Preference preference = mPreferenceRef.get();
+			if (preference != null)
+				preference.setEnabled(false);
+		}
+
+		@Override
+		protected Boolean doInBackground(Void... params) {
+			return BackupManager.backupActiveBook();
+		}
+
+		@Override
+		protected void onPostExecute(Boolean result) {
+			Preference preference = mPreferenceRef.get();
+			if (preference != null)
+				preference.setEnabled(true);
+
+			int msg = result ? R.string.toast_backup_successful : R.string.toast_backup_failed;
+			Toast.makeText(mAppContext, msg, Toast.LENGTH_SHORT).show();
+		}
 	}
 
 	/**
