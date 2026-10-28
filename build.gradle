@@ -1,0 +1,19 @@
+buildscript {
+	repositories{
+		jcenter()
+		google()
+	}
+	dependencies {
+		classpath 'com.android.tools.build:gradle:3.0.1'
+		classpath 'com.stanfy.spoon:spoon-gradle-plugin:1.2.2'
+	}
+}
+
+allprojects {
+    repositories {
+        maven { url "https://jitpack.io" }
+        jcenter()
+        google()
+        mavenCentral()
+    }
+}

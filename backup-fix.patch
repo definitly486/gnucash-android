@@ -1,0 +1,76 @@
+diff --git a/app/src/main/java/org/gnucash/android/util/BackupManager.java b/app/src/main/java/org/gnucash/android/util/BackupManager.java
+index 9969ab6..dc41ddb 100644
+--- a/app/src/main/java/org/gnucash/android/util/BackupManager.java
++++ b/app/src/main/java/org/gnucash/android/util/BackupManager.java
+@@ -72,17 +72,8 @@ public class BackupManager {
+                 continue;
+             }
+ 
+-            try (BufferedOutputStream bufferedOutputStream =
+-                    new BufferedOutputStream(context.getContentResolver().openOutputStream(Uri.parse(backupFile)))){
+-                GZIPOutputStream gzipOutputStream = new GZIPOutputStream(bufferedOutputStream);
+-                OutputStreamWriter writer = new OutputStreamWriter(gzipOutputStream);
+-                ExportParams params = new ExportParams(ExportFormat.XML);
+-                new GncXmlExporter(params).generateExport(writer);
+-                writer.close();
+-            } catch (IOException ex) {
++            if (!backupBook(bookUID)) {
+                 Log.e(LOG_TAG, "Auto backup failed for book " + bookUID);
+-                ex.printStackTrace();
+-                Crashlytics.logException(ex);
+             }
+         }
+     }
+@@ -104,28 +95,40 @@ public class BackupManager {
+      * @return {@code true} if backup was successful, {@code false} otherwise
+      */
+     public static boolean backupBook(String bookUID){
+-        OutputStream outputStream;
++        String backupFile = getBookBackupFileUri(bookUID);
++        Context context = GnuCashApplication.getAppContext();
++        OutputStream outputStream = null;
+         try {
+-            String backupFile = getBookBackupFileUri(bookUID);
+             if (backupFile != null){
+-                outputStream = GnuCashApplication.getAppContext().getContentResolver().openOutputStream(Uri.parse(backupFile));
++                // "wt" = write + truncate. Plain "w" does not truncate on Android 10+,
++                // and some providers leave a 0-byte file if the stream is never closed
++                outputStream = context.getContentResolver()
++                        .openOutputStream(Uri.parse(backupFile), "wt");
+             } else { //no Uri set by user, use default location on SD card
+                 backupFile = getBackupFilePath(bookUID);
+                 outputStream = new FileOutputStream(backupFile);
+             }
++            if (outputStream == null)
++                throw new IOException("Could not open output stream for " + backupFile);
+ 
+-            BufferedOutputStream bufferedOutputStream = new BufferedOutputStream(outputStream);
+-            GZIPOutputStream gzipOutputStream = new GZIPOutputStream(bufferedOutputStream);
+-            OutputStreamWriter writer = new OutputStreamWriter(gzipOutputStream);
+-
+-            ExportParams params = new ExportParams(ExportFormat.XML);
+-            new GncXmlExporter(params).generateExport(writer);
+-            writer.close();
++            // try-with-resources guarantees close()/flush() even if the export throws
++            try (BufferedOutputStream bufferedOutputStream = new BufferedOutputStream(outputStream);
++                 GZIPOutputStream gzipOutputStream = new GZIPOutputStream(bufferedOutputStream);
++                 OutputStreamWriter writer = new OutputStreamWriter(gzipOutputStream, "UTF-8")) {
++                ExportParams params = new ExportParams(ExportFormat.XML);
++                new GncXmlExporter(params).generateExport(writer);
++                writer.flush();
++                gzipOutputStream.finish();
++            }
+             return true;
+-        } catch (IOException | Exporter.ExporterException e) {
++        } catch (IOException | RuntimeException e) { // ExporterException is a RuntimeException
+             Crashlytics.logException(e);
+-            Log.e("GncXmlExporter", "Error creating XML  backup", e);
++            Log.e(LOG_TAG, "Error creating XML backup", e);
+             return false;
++        } finally {
++            if (outputStream != null) {
++                try { outputStream.close(); } catch (IOException ignored) {}
++            }
+         }
+     }
+ 
